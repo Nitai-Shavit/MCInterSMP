@@ -4,9 +4,9 @@
 --
 -- CONFIG --------------------------------------------------------------------
 local PROTO  = "storagemon"
-local TITLE  = "INTER SMP STORAGE"
+local TITLE  = "Kingdom of Bavaria Storage Monitor"
 local STALE  = 12       -- seconds before a missing collector's data drops off
-local SCALE  = 0.5      -- monitor font: 0.5..5 in 0.5 steps. Smaller = more rows.
+local SCALE  = 1        -- monitor font: 0.5..5 in 0.5 steps. Smaller = more rows.
 -- Display order, top to bottom. Names must match the GROUP set in setup exactly.
 -- Anything not listed falls below these, alphabetically.
 local ORDER  = { "Main", "Resource Vault", "Agricultural", "Arbor" }
@@ -89,12 +89,14 @@ local function drawMain()
   rowMap = {}
   mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white); mon.clear()
   local W, H = mon.getSize()
-  mon.setCursorPos(1,1); mon.setTextColor(colors.cyan); mon.write(pad(TITLE, W-5))
-  mon.setTextColor(colors.lightGray); mon.setCursorPos(W-4,1)
-  mon.write(textutils.formatTime(os.time(), true))
-
-  local labelW, statsW = 10, 16
-  local barW = math.max(W - labelW - statsW - 2, 4)
+  local clock = textutils.formatTime(os.time(), true)
+  mon.setCursorPos(1,1); mon.setTextColor(colors.cyan)
+  if W - #clock - 2 >= 8 then
+    mon.write(pad(TITLE, W - #clock - 1))
+    mon.setTextColor(colors.lightGray); mon.setCursorPos(W-#clock+1,1); mon.write(clock)
+  else
+    mon.write(pad(TITLE, W))  -- monitor too narrow for title + clock; drop the clock
+  end
 
   local items, fluids = {}, {}
   for _, d in ipairs(groups()) do
@@ -106,6 +108,16 @@ local function drawMain()
     return a.label < b.label
   end
   table.sort(items, byRank); table.sort(fluids, byRank)
+
+  -- Size the label column to the longest label actually on screen (capped),
+  -- so names like "Resource Vault" don't get truncated, while still leaving
+  -- the bar a sane minimum width.
+  local maxLabel = 4
+  for _, d in ipairs(items) do maxLabel = math.max(maxLabel, #d.label) end
+  for _, d in ipairs(fluids) do maxLabel = math.max(maxLabel, #d.label) end
+  local labelW = math.min(maxLabel, math.max(math.floor(W * 0.35), 6))
+  local statsW = math.min(16, math.max(math.floor(W * 0.3), 8))
+  local barW = math.max(W - labelW - statsW - 2, 4)
 
   local y = 3
   for _, d in ipairs(items) do
