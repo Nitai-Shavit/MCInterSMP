@@ -25,28 +25,53 @@ local function saveCfg(c)
   local f = fs.open(CFGFILE, "w"); f.write(textutils.serialise(c)); f.close()
 end
 
--- Setup wizard: assign Label (per-unit name) + Group (merge key / bar title).
+-- Setup wizard: assign Group (merge key / bar title) per peripheral.
 -- Same Group = merged into one bar on the display. Fluid capacity is asked in
 -- buckets because CC's generic fluid peripheral reports amount but NOT capacity.
+-- Once a group has been typed for a kind, leaving Group blank on a later
+-- peripheral of that same kind reuses it (and its capacity, for fluids) for
+-- that peripheral AND all remaining ones of that kind without asking again —
+-- multiple silos/tanks in a cluster are almost always the same responsibility.
 local function setup()
   print("=== Storage Monitor setup ===")
   local cfg = { entries = {} }
+  local lastGroup, lastCap, auto = {}, {}, {}  -- keyed by kind: "item" / "fluid"
   for _, name in ipairs(peripheral.getNames()) do
     local k = kindOf(name)
     if k then
-      print(("\nFound %s  [%s]"):format(name, k))
-      write("  Label (blank = skip): "); local label = read()
-      if label ~= "" then
-        write("  Group (blank = use label): "); local group = read()
-        if group == "" then group = label end
-        local cap
-        if k == "fluid" then
-          write("  Capacity in buckets: ")
-          cap = tonumber(read()); if cap then cap = cap * 1000 end  -- store as mB
+      local group, cap
+      if auto[k] then
+        group, cap = lastGroup[k], lastCap[k]
+        print(("\nFound %s  [%s] -> auto-grouped as \"%s\""):format(name, k, group))
+      else
+        print(("\nFound %s  [%s]"):format(name, k))
+        if lastGroup[k] then
+          write(("  Group (blank = \"%s\", applies to this + all remaining %ss): ")
+                :format(lastGroup[k], k))
+        else
+          write("  Group (blank = skip): ")
         end
-        cfg.entries[#cfg.entries+1] =
-          { peripheral=name, label=label, group=group, kind=k, capacity=cap }
+        local input = read()
+        if input == "" then
+          if lastGroup[k] then
+            group, cap = lastGroup[k], lastCap[k]
+            auto[k] = true
+            print(("  Applying \"%s\" to remaining %ss."):format(group, k))
+          end
+        else
+          group = input
+          if k == "fluid" then
+            write("  Capacity in buckets: ")
+            cap = tonumber(read()); if cap then cap = cap * 1000 end  -- store as mB
+          end
+        end
+      end
+      if group then
+        cfg.entries[#cfg.entries+1] = { peripheral=name, group=group, kind=k, capacity=cap }
+        lastGroup[k], lastCap[k] = group, cap
         print("  added.")
+      else
+        print("  skipped.")
       end
     end
   end
@@ -97,7 +122,7 @@ print("Collector "..myId.." running. Ctrl+T to stop.")
 local function broadcast()
   local entries = {}
   for _, e in ipairs(cfg.entries) do
-    local row = { id=myId.."/"..e.peripheral, label=e.label,
+    local row = { id=myId.."/"..e.peripheral,
                   group=e.group, kind=e.kind, online=peripheral.isPresent(e.peripheral) }
     if row.online then
       if e.kind == "item" then row.used, row.total = scanItem(e.peripheral)

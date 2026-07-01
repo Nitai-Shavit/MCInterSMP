@@ -15,7 +15,10 @@ Wireless modems in CC only carry **messages between computers** — they cannot
   **wireless/ender** modem using rednet protocol `"storagemon"`. Also answers
   `detail_req` messages with a per-item breakdown. Includes a setup wizard
   (`collector setup`) that auto-detects item/fluid peripherals by method and
-  saves labels/groups/capacities to `storage.cfg`.
+  saves groups/capacities to `storage.cfg`. Leaving Group blank once a group
+  has been typed for that kind reuses it (and capacity, for fluids) for that
+  peripheral and all remaining ones of the same kind — most clusters are one
+  group across many silos/tanks, so you only type it once per cluster.
 - **display.lua** — runs on the computer wired to an **Advanced** monitor.
   Listens to all collectors, merges entries by group, draws fill bars, and on
   touch shows an item breakdown for that group.
@@ -26,8 +29,8 @@ modem (rednet). The code deliberately picks the wireless one via `isWireless()`.
 ## Data model
 
 - **Group** = merge key AND bar title. Same group = one combined bar
-  (e.g. all 14 main silos share group `Main`).
-- **Label** = per-unit name. Captured in setup; not currently shown anywhere.
+  (e.g. all 14 main silos share group `Main`). There is no separate per-unit
+  label — it was never surfaced anywhere, so setup only asks for Group.
 - Fluid **capacity** is stored in **mB** (buckets x 1000).
 
 ## Constraints (important)
@@ -72,10 +75,14 @@ version and overwrites the local copy (config in `storage.cfg` is untouched).
 - `ORDER` in display.lua controls top-to-bottom order; unlisted groups fall
   below, alphabetically. Items section first, then a `----- Fluids -----`
   separator, then fluids.
+- Detail (item breakdown) view paginates when the item list is taller than
+  the screen. The bottom row becomes touch zones: left half = back to main,
+  right half = next page (wraps). With only one page, the whole bottom row
+  is just "touch to go back".
 
 ## Possible next features (not yet built)
 
 - Discord webhook alert via `http.post` when Main crosses ~90%.
 - Fill-rate / time-to-full estimate per group (delta between scans).
 - Buffer-mode inversion for the intermediate Resource Vault (low = bad).
-- Paging if groups exceed one screen.
+- Paging if groups (bars) exceed one screen (detail-view item paging is done).

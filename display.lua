@@ -136,22 +136,49 @@ local function drawMain()
   end
 end
 
+-- Rows reserved outside the item list: title, status/page line, footer.
+local DETAIL_CHROME = 3
+
 local function drawDetail()
   mon.setBackgroundColor(colors.black); mon.setTextColor(colors.white); mon.clear()
   local W, H = mon.getSize()
   mon.setCursorPos(1,1); mon.setTextColor(colors.cyan); mon.write(pad(view.group.." - details", W))
-  if view.collecting then mon.setCursorPos(1,2); mon.setTextColor(colors.gray); mon.write("scanning...") end
+
   local sorted = {}
   for nm, ct in pairs(view.items) do sorted[#sorted+1] = { nm=nm, ct=ct } end
   table.sort(sorted, function(a,b) return a.ct > b.ct end)
+
+  local rows = math.max(H - DETAIL_CHROME, 1)
+  local pages = math.max(math.ceil(#sorted / rows), 1)
+  if view.page > pages then view.page = pages end
+  view.pages = pages
+  local start = (view.page - 1) * rows
+
+  mon.setCursorPos(1,2); mon.setTextColor(colors.gray)
+  if view.collecting then
+    mon.write("scanning...")
+  elseif pages > 1 then
+    mon.write(("page %d/%d  (%d items)"):format(view.page, pages, #sorted))
+  else
+    mon.write(("%d items"):format(#sorted))
+  end
+
   local y = 3
-  for _, it in ipairs(sorted) do
-    if y > H-1 then break end
+  for i = start+1, math.min(start+rows, #sorted) do
+    local it = sorted[i]
     mon.setCursorPos(1,y); mon.setTextColor(colors.white); mon.write(pad(pretty(it.nm), W-8))
     mon.setTextColor(colors.lime); mon.setCursorPos(W-7,y); mon.write(pad(it.ct, 8))
     y = y + 1
   end
-  mon.setTextColor(colors.gray); mon.setCursorPos(1,H); mon.write("touch to go back")
+
+  mon.setTextColor(colors.gray); mon.setCursorPos(1,H)
+  if pages > 1 then
+    local half = math.floor(W/2)
+    mon.write(pad("< back", half))
+    mon.setCursorPos(half+1,H); mon.write(pad("next page >", W-half))
+  else
+    mon.write("touch to go back")
+  end
 end
 
 local function draw() if view.mode == "detail" then drawDetail() else drawMain() end end
@@ -159,7 +186,7 @@ local function draw() if view.mode == "detail" then drawDetail() else drawMain()
 -- Two separate timers so a routine redraw can't slam the detail window shut early.
 local redrawTimer, collectTimer = os.startTimer(0), nil
 local function requestDetail(g)
-  view = { mode="detail", group=g, items={}, collecting=true }
+  view = { mode="detail", group=g, items={}, collecting=true, page=1, pages=1 }
   rednet.broadcast({ type="detail_req", group=g }, PROTO)
   collectTimer = os.startTimer(1.2)
 end
@@ -172,9 +199,19 @@ while true do
       for nm, ct in pairs(b.items) do view.items[nm] = (view.items[nm] or 0) + ct end
       draw()
     end
-  elseif ev == "monitor_touch" then     -- event, side, x, y  -> y is c
-    if view.mode == "detail" then view = { mode="main" }
-    else local g = rowMap[c]; if g then requestDetail(g) end end
+  elseif ev == "monitor_touch" then     -- event, side, x, y  -> x is b, y is c
+    if view.mode == "detail" then
+      local W, H = mon.getSize()
+      if c == H then
+        if view.pages > 1 and b > math.floor(W/2) then
+          view.page = (view.page % view.pages) + 1
+        else
+          view = { mode="main" }
+        end
+      end
+    else
+      local g = rowMap[c]; if g then requestDetail(g) end
+    end
     draw()
   elseif ev == "timer" then
     if a == collectTimer then
