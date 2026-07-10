@@ -1,17 +1,22 @@
--- install.lua (CC:Tweaked) — bootstrap installer for the storage monitor.
--- Fetches collector.lua or display.lua straight from this repo (no pastebin)
--- and writes a startup.lua that re-pulls the latest version from GitHub on
--- every boot before running it, so an already-deployed computer picks up
--- updates just by rebooting. If the pull fails (offline / http disabled),
--- it falls back to whatever copy is already on disk. Single-line paste:
+-- install.lua (CC:Tweaked) — bootstrap installer for the storage monitor and
+-- the cannon command subsystem. Fetches the matching program straight from
+-- this repo (no pastebin) and writes a startup.lua that re-pulls the latest
+-- version from GitHub on every boot before running it, so an already-
+-- deployed computer picks up updates just by rebooting. If the pull fails
+-- (offline / http disabled), it falls back to whatever copy is already on
+-- disk. Single-line paste, one of:
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua collector
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua display
+--   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua radar
+--   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua cannon
+--   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua master
 
 local REPO = "https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/"
+local ROLES = { collector=true, display=true, radar=true, cannon=true, master=true }
 local role = ...
 
-if role ~= "collector" and role ~= "display" then
-  print("Usage: wget run "..REPO.."install.lua <collector|display>")
+if not ROLES[role] then
+  print("Usage: wget run "..REPO.."install.lua <collector|display|radar|cannon|master>")
   return
 end
 
