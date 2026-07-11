@@ -1,10 +1,16 @@
 # CLAUDE.md — Storage Monitor + Cannon Command (ComputerCraft: Tweaked)
 
-Two independent ComputerCraft subsystems for a Create-based modded Minecraft
-SMP (NeoForge 1.21.1), written in Lua for **CC: Tweaked**: a storage-fill
-monitor (collector.lua/display.lua) and a Create: Radars + Create: Big Cannons
-targeting system (radar.lua/cannon.lua/master.lua). Do not assume any other
-peripheral mod is present — see each section's Constraints.
+Three independent ComputerCraft subsystems for a Create-based modded
+Minecraft SMP (NeoForge 1.21.1), written in Lua for **CC: Tweaked**: a
+storage-fill monitor (collector.lua/display.lua), a Create: Radars + Create:
+Big Cannons targeting system (radar.lua/cannon.lua/master.lua/ship.lua/
+fleetboard.lua), and a BlueMap-based player radar (playerradar.lua). Do not
+assume any other peripheral mod is present — see each section's Constraints.
+
+**Naming note:** `radar.lua` (Part 2, Create: Radars cannon targeting) and
+`playerradar.lua` (Part 4, BlueMap player tracking) are unrelated programs
+that happen to share "radar" in the name — different peripherals, different
+rednet protocols (`cbcnet` vs. none), different purposes. Don't confuse them.
 
 ## Part 1 — Storage Monitor
 
@@ -193,6 +199,33 @@ CC:Sable — works on a moving ship, no bridge-mod API uncertainty.
   the aiming math at all, only in whatever fleetboard.lua chooses to show,
   so a wrong guess there can't affect firing accuracy.
 
+## Part 4 — Player Radar (BlueMap)
+
+**Separate from Parts 1-3.** `playerradar.lua` is a standalone, single-
+computer program: no modem, no op access, no rednet. Runs on a computer
+wired to an Advanced monitor with HTTP access, and polls BlueMap's live
+player API (`GET <url>/maps/<map>/live/players`) instead of using any CC
+peripheral — BlueMap has no outbound-webhook feature, so this is polling on
+a timer, not a push. Plots player positions as a top-down radar, color-coded
+by an ally/enemy roster: ally = green, enemy = red, neutral (unlisted) =
+yellow. Includes a setup wizard (`playerradar setup`) that saves the
+BlueMap URL, map id, poll interval, view center/radius, and roster to
+`playerradar.cfg`. Touching a dot shows that player's name and coordinates
+for a few seconds.
+
+The roster currently only affects dot **color** — every player BlueMap
+reports is plotted regardless of classification (see Possible next
+features). Entries with `foreign = true` (player on a different BlueMap
+map) are skipped since their coordinates don't apply to the polled map.
+
+### Constraints
+
+- **BlueMap dependency**: BlueMap must already be running, its live player
+  markers enabled, and its host:port added to the server's CC:Tweaked
+  `http.rules` allowlist — same kind of server-admin config as
+  `raw.githubusercontent.com` for wget, no in-game op required.
+- Same Advanced-monitor requirement as Part 1 (color + `monitor_touch`).
+
 ## Deploying via wget (no pastebin)
 
 On a fresh computer, paste one of these single lines (adjust the branch/path
@@ -206,13 +239,14 @@ wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua master
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua ship
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua fleetboard
+wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua playerradar
 ```
 
 `install.lua` downloads the matching program into the computer's root and
 writes a `startup.lua` that re-pulls it from GitHub on every boot before
 running it (falls back to the local copy if offline), so a reboot picks up
-future repo updates. Config files (`storage.cfg`, `cannon.cfg`, `ship.cfg`)
-are untouched by re-installs.
+future repo updates. Config files (`storage.cfg`, `cannon.cfg`, `ship.cfg`,
+`playerradar.cfg`) are untouched by re-installs.
 
 ## Possible next features (not yet built)
 
@@ -227,3 +261,5 @@ are untouched by re-installs.
   wiring the same `sublevel` position into Part 2's cannon.lua too, so
   ship-mounted stationary-style cannons don't need a manually re-entered
   static mount position.
+- Player Radar: filter to enemies-only (or hide allies) instead of always
+  showing everyone tracked by BlueMap.
