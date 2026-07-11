@@ -1,8 +1,9 @@
--- install.lua (CC:Tweaked) — bootstrap installer for the storage monitor and
--- the cannon command subsystem. Fetches the matching program straight from
--- this repo (no pastebin) and writes a startup.lua that re-pulls the latest
--- version from GitHub on every boot before running it, so an already-
--- deployed computer picks up updates just by rebooting. If the pull fails
+-- install.lua (CC:Tweaked) — bootstrap installer for the storage monitor,
+-- the cannon command subsystem, and the player radar. Fetches the matching
+-- program straight from this repo (no pastebin) and writes a startup.lua
+-- that re-pulls the latest version from GitHub on every boot before
+-- running it, so an already-deployed computer picks up updates just by
+-- rebooting. If the pull fails
 -- (offline / http disabled), it falls back to whatever copy is already on
 -- disk. Single-line paste, one of:
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua collector
@@ -12,14 +13,15 @@
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua master
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua ship
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua fleetboard
+--   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua playerradar
 
 local REPO = "https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/"
 local ROLES = { collector=true, display=true, radar=true, cannon=true, master=true,
-                ship=true, fleetboard=true }
+                ship=true, fleetboard=true, playerradar=true }
 local role = ...
 
 if not ROLES[role] then
-  print("Usage: wget run "..REPO.."install.lua <collector|display|radar|cannon|master|ship|fleetboard>")
+  print("Usage: wget run "..REPO.."install.lua <collector|display|radar|cannon|master|ship|fleetboard|playerradar>")
   return
 end
 
