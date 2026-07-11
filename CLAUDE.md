@@ -137,47 +137,61 @@ on ONE cannon, then the full aim loop), and expect to tune constants.
 - No collision/obstacle checking — a solved trajectory that clips terrain or
   a build in the way is not detected.
 
-## Part 3 — Fleet Status Board (CC:Sable, manually-aimed ships)
+## Part 3 — Fleet Cannon Control (GPS-aimed ships: Bolt I/II/III, master Lightning)
 
-**Separate from Part 2.** Part 2 auto-aims stationary cannons. This part is
-for ships whose cannons are aimed manually (binoculars) — it's read-only
-telemetry, `ship.lua`/`fleetboard.lua` never send an aim or fire command, on
-its own rednet protocol (`"shipnet"`) so it can't cross-talk with Part 2.
+**Separate from Part 2.** Part 2 auto-aims stationary cannons using
+Create:Radars tracks. Part 3 is for named gun ships (e.g. Bolt I/II/III)
+whose cannons are computer-aimed at an operator-given point from the master
+ship (Lightning), on its own rednet protocol (`"shipnet"`) so it can't
+cross-talk with Part 2. Uses `gps.locate()` for live position instead of
+CC:Sable — works on a moving ship, no bridge-mod API uncertainty.
 
-- **ship.lua** — one per gun ship, on a computer physically placed **on**
-  the ship (CC:Sable's `sublevel` global API only works for a computer that
-  is itself on a Sub-Level — wiring in remotely doesn't get you this data).
-  `ship setup` asks for a short Ship ID and which redstone side carries Big
-  Cannons' **Cannon Ready Lamp** signal (lit = loaded, aimed, ready to
-  fire — plain `redstone.getInput()`, no bridge mod needed for that part).
-  Broadcasts `{id, position, pitch, roll, loaded}`.
-- **fleetboard.lua** — runs on the master ship's own computer (also needs to
-  be on a Sub-Level, for its own position). Read-only board: distance to
-  each ship, ready state, and pitch/roll so you can see if a ship is too
-  unstable to safely fire on before giving the order. Smart-for-small-
-  screens: one compact line per ship, auto-paginates on a timer if more
-  ships don't fit than the monitor has rows for (works on a plain, non-
-  Advanced monitor too, since paging doesn't depend on touch — touch just
-  skips to the next page sooner if you do have one). `SAFE_TILT` (10°)
-  flags a ship's pitch/roll red when it exceeds that threshold.
+- **ship.lua** — one per gun ship. Wired to each cannon's Auto Pitch/Yaw/Fire
+  Controllers (grouped under a Cannon ID at setup, same convention as
+  cannon.lua — blank reuses the last ID). `ship setup` asks the Ship ID
+  (e.g. "Bolt I"), then per cannon: barrel length and propellant charges
+  (mount position is NOT asked — it's read live via `gps.locate()` every
+  cycle, since the ship moves). `ship commission` is the same one-time typed
+  `YES` gate as master.lua's, scoped to this ship's own cannons — a cannon
+  stays under the radar mod's auto-aim until commissioned.
 
-### Unverified: CC:Sable's exact API
+  On receiving an `aim {x,y,z}` message it solves a firing solution **per
+  cannon** (same muzzle-offset brute-force ballistics as master.lua, using
+  its own live GPS position as the mount), commands the angles, then polls
+  `getAngle()` each cycle and **fires automatically** (`fire.keepFiring()`)
+  once both axes settle within `AIM_TOLERANCE_DEG`, or after `AIM_TIMEOUT`
+  as a safety valve so a cannon that can't quite settle doesn't wait
+  forever. There is no Cannon Ready Lamp on these ships, so "ready" is
+  derived from this settle check, not a redstone signal.
 
-CC:Sable's `sublevel` global API (and its bundled quaternion module) is
-confirmed to exist and to be the right tool here, but the **exact method
-names could not be confirmed from public docs** in the session that wrote
-this — the mod's docs site 403s automated fetches and GitHub code search
-needs a login. `shipPosition()`/`shipPitchRoll()` in ship.lua (and
-`myPosition()` in fleetboard.lua) are isolated, best-effort guesses
-(`sublevel.getPosition()`, `sublevel.getRotation()` + a `quaternion.toEuler()`
-conversion). They fail safe — a wrong name just makes that field show `?`
-instead of crashing — but **before trusting the numbers**, run on a ship
-computer:
-```
-for k in pairs(sublevel) do print(k) end
-```
-and fix those two functions to match what's actually there. Cannon-ready
-detection (redstone) needs no such verification — it's base CC:Tweaked.
+- **fleetboard.lua** — runs on Lightning's own computer, wired to its
+  monitor. The monitor is a **read-only** board (one compact line per bolt:
+  enabled marker, distance via each side's own GPS position, and a cannon-
+  state summary), auto-paginating on a timer for a small screen. All
+  commands go through the computer's own **terminal**, running alongside the
+  monitor loop via `parallel.waitForAny` so typing doesn't freeze the
+  display: `list`, `enable <name>`, `disable <name>`, `aim <x> <y> <z>`.
+
+  **Safety gate:** `aim` is sent by targeted `rednet.send()` to each
+  enabled bolt's known computer ID — never broadcast — and every bolt
+  starts **disabled** on boot (the roster isn't saved to disk). A bolt left
+  behind on a previous session can't be commanded until you explicitly
+  `enable` it again this session, so it can't fire on a stale/accidental
+  command.
+
+### Unverified / to tune once tested in-game
+
+- `GRAVITY`/`DRAG`, the yaw convention, and the lack of collision checking
+  carry the same caveats as Part 2 — see that section.
+- `AIM_TOLERANCE_DEG` (1.5°) and `AIM_TIMEOUT` (8s) control when a settling
+  cannon is declared "close enough" and fires; tune both once you've seen
+  how precisely the Auto Pitch/Yaw Controllers actually track a commanded
+  angle in-game.
+- Ship pitch/roll is still attempted as optional bonus telemetry via the
+  same best-effort CC:Sable `sublevel` read as before (isolated in
+  `shipPitchRoll()`, fails to `nil`/`?` harmlessly) — it is **not** used in
+  the aiming math at all, only in whatever fleetboard.lua chooses to show,
+  so a wrong guess there can't affect firing accuracy.
 
 ## Deploying via wget (no pastebin)
 
