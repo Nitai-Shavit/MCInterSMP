@@ -137,6 +137,48 @@ on ONE cannon, then the full aim loop), and expect to tune constants.
 - No collision/obstacle checking — a solved trajectory that clips terrain or
   a build in the way is not detected.
 
+## Part 3 — Fleet Status Board (CC:Sable, manually-aimed ships)
+
+**Separate from Part 2.** Part 2 auto-aims stationary cannons. This part is
+for ships whose cannons are aimed manually (binoculars) — it's read-only
+telemetry, `ship.lua`/`fleetboard.lua` never send an aim or fire command, on
+its own rednet protocol (`"shipnet"`) so it can't cross-talk with Part 2.
+
+- **ship.lua** — one per gun ship, on a computer physically placed **on**
+  the ship (CC:Sable's `sublevel` global API only works for a computer that
+  is itself on a Sub-Level — wiring in remotely doesn't get you this data).
+  `ship setup` asks for a short Ship ID and which redstone side carries Big
+  Cannons' **Cannon Ready Lamp** signal (lit = loaded, aimed, ready to
+  fire — plain `redstone.getInput()`, no bridge mod needed for that part).
+  Broadcasts `{id, position, pitch, roll, loaded}`.
+- **fleetboard.lua** — runs on the master ship's own computer (also needs to
+  be on a Sub-Level, for its own position). Read-only board: distance to
+  each ship, ready state, and pitch/roll so you can see if a ship is too
+  unstable to safely fire on before giving the order. Smart-for-small-
+  screens: one compact line per ship, auto-paginates on a timer if more
+  ships don't fit than the monitor has rows for (works on a plain, non-
+  Advanced monitor too, since paging doesn't depend on touch — touch just
+  skips to the next page sooner if you do have one). `SAFE_TILT` (10°)
+  flags a ship's pitch/roll red when it exceeds that threshold.
+
+### Unverified: CC:Sable's exact API
+
+CC:Sable's `sublevel` global API (and its bundled quaternion module) is
+confirmed to exist and to be the right tool here, but the **exact method
+names could not be confirmed from public docs** in the session that wrote
+this — the mod's docs site 403s automated fetches and GitHub code search
+needs a login. `shipPosition()`/`shipPitchRoll()` in ship.lua (and
+`myPosition()` in fleetboard.lua) are isolated, best-effort guesses
+(`sublevel.getPosition()`, `sublevel.getRotation()` + a `quaternion.toEuler()`
+conversion). They fail safe — a wrong name just makes that field show `?`
+instead of crashing — but **before trusting the numbers**, run on a ship
+computer:
+```
+for k in pairs(sublevel) do print(k) end
+```
+and fix those two functions to match what's actually there. Cannon-ready
+detection (redstone) needs no such verification — it's base CC:Tweaked.
+
 ## Deploying via wget (no pastebin)
 
 On a fresh computer, paste one of these single lines (adjust the branch/path
@@ -148,13 +190,15 @@ wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua radar
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua cannon
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua master
+wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua ship
+wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua fleetboard
 ```
 
 `install.lua` downloads the matching program into the computer's root and
 writes a `startup.lua` that re-pulls it from GitHub on every boot before
 running it (falls back to the local copy if offline), so a reboot picks up
-future repo updates. Config files (`storage.cfg`, `cannon.cfg`) are untouched
-by re-installs.
+future repo updates. Config files (`storage.cfg`, `cannon.cfg`, `ship.cfg`)
+are untouched by re-installs.
 
 ## Possible next features (not yet built)
 
@@ -165,3 +209,7 @@ by re-installs.
 - Cannon Command: obstacle/collision-aware trajectory checking.
 - Cannon Command: a calibration flow that fires test shots and back-solves
   muzzle speed / drag instead of relying on hand-tuned constants.
+- Fleet Board: once CC:Sable's real API is confirmed in-game, consider
+  wiring the same `sublevel` position into Part 2's cannon.lua too, so
+  ship-mounted stationary-style cannons don't need a manually re-entered
+  static mount position.
