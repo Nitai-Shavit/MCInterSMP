@@ -4,7 +4,8 @@ Three independent ComputerCraft subsystems for a Create-based modded
 Minecraft SMP (NeoForge 1.21.1), written in Lua for **CC: Tweaked**: a
 storage-fill monitor (collector.lua/display.lua), a Create: Radars + Create:
 Big Cannons targeting system (radar.lua/cannon.lua/master.lua/ship.lua/
-fleetboard.lua), and a BlueMap-based player radar (playerradar.lua). Do not
+fleetboard.lua, plus the standalone one-computer console gunner.lua), and a
+BlueMap-based player radar (playerradar.lua). Do not
 assume any other peripheral mod is present — see each section's Constraints.
 
 **Naming note:** `radar.lua` (Part 2, Create: Radars cannon targeting) and
@@ -199,6 +200,62 @@ CC:Sable — works on a moving ship, no bridge-mod API uncertainty.
   the aiming math at all, only in whatever fleetboard.lua chooses to show,
   so a wrong guess there can't affect firing accuracy.
 
+## Part 5 — Gunner (standalone single-cannon console, CC:CBC cannon_mount)
+
+**Separate from Parts 2 and 3.** `gunner.lua` is a self-contained, ONE-computer
+aim-and-fire console for a single Create: Big Cannons cannon — no rednet, no
+master, no second computer. Where Part 2 auto-aims a cluster of cannons at
+radar tracks and Part 3 fleet-commands gun ships, Part 5 is the simple "type a
+coordinate, it aims and shoots" operator tool the SMP originally asked for.
+
+- **Position:** `gps.locate()` every shot, so it works on a moving contraption.
+  The cannon MOUNT is derived as `gps + offset`, where the offset
+  (`MOUNT - COMPUTER`, read off F3) is captured once in `gunner setup`. If GPS
+  is unavailable it falls back to the static mount coords from setup.
+- **Backend auto-detect (two routes):** prefers the **CC:CBC `cannon_mount`**
+  peripheral (`setComputerControl`/`setTargetAngles`/`setTargetYaw`/
+  `setTargetPitch`/`fire`/`assemble`/`getInfo`, angles in degrees, yaw `0..360`
+  matching in-game). Falls back to Create: Radars' **Auto Pitch/Yaw + Fire
+  controllers** (`setAngle`/`getAngle` + `fireOn`/`fireOff`/`setPowered`) so it
+  also drives a cannon wired the Part-2 way. This is the only program in the
+  repo that uses CC:CBC's `cannon_mount` directly rather than the radar-mod
+  controllers.
+- **Ballistics:** same brute-force solver as master.lua (`solvePitches` scans
+  the configured pitch range, simulates each candidate tick-by-tick with
+  gravity + drag, bisects around sign changes), but the constants live in
+  `gunner.cfg` and default to the community CBC calculator's values —
+  **gravity 0.05 b/t², drag 1%/t, muzzle speed = charges x 2 b/t** — instead of
+  master.lua's borrowed-from-rockets 0.04. Yaw uses Minecraft's real convention
+  (`atan2(-dx, dz)`; 0=+Z south) and the muzzle-offset math is self-consistent
+  with it; `yawOffset`/`pitchOffset` in the cfg are calibration fudge factors
+  for when a live test shot lands off.
+- **Setup asks** the un-reportable facts: mount coords, barrel length, charges,
+  blocks/tick per charge, and the elevation limits (`pitchMax` up, `pitchMin` —
+  negative if the mount can depress below horizontal, 0 if level-or-up only).
+- **Firing** is automatic once the cannon settles on the commanded angles
+  (`waitSettle` polls the backend's angle telemetry, or waits a fixed estimate
+  if the backend reports none), with a 3-second **press-any-key-to-abort**
+  window before the shot so a bad solution can be stopped.
+- **Self-update:** on launch it `wget`s the latest `gunner.lua` from this repo
+  and relaunches if it changed (guarded by a `noupdate` sentinel arg), on top
+  of install.lua's boot-time re-pull — so a deployed gunner always runs current.
+- **Commands:** `aim <x y z>`, `radar` (pick a live Create: Radars track),
+  `arc` (toggle shallow/steep preferred arc), `angles <y p>` (manual),
+  `fire`/`hold`, `assemble`/`disassemble`, `info`, `setup`, `wiring`, `quit`.
+  `gunner wiring` prints the full hookup guide.
+
+### Unverified / to tune once tested in-game
+
+- Same caveat as Parts 2/3: the ballistics constants and yaw convention are
+  best-effort. If a shot lands short/long, tune `gravity`/`drag` in
+  `gunner.cfg`; if it aims a fixed amount off in bearing/elevation, set
+  `yawOffset`/`pitchOffset`. No obstacle/terrain-collision checking.
+- The CC:CBC `getInfo()` field names read for angle telemetry
+  (`yaw`/`currentYaw`/`cannonYaw`, likewise pitch) are a best guess; if
+  `waitSettle` never reports "on target" it's falling back to the fixed-time
+  wait, which still fires — verify the real field names with the `info`
+  command and adjust `readAngles` if you want true settle detection.
+
 ## Part 4 — Player Radar (BlueMap)
 
 **Separate from Parts 1-3.** `playerradar.lua` is a standalone, single-
@@ -236,6 +293,7 @@ wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua display
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua radar
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua cannon
+wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua gunner
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua master
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua ship
 wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua fleetboard

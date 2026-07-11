@@ -10,6 +10,7 @@
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua display
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua radar
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua cannon
+--   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua gunner
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua master
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua ship
 --   wget run https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/install.lua fleetboard
@@ -17,11 +18,11 @@
 
 local REPO = "https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/"
 local ROLES = { collector=true, display=true, radar=true, cannon=true, master=true,
-                ship=true, fleetboard=true, playerradar=true }
+                ship=true, fleetboard=true, playerradar=true, gunner=true }
 local role = ...
 
 if not ROLES[role] then
-  print("Usage: wget run "..REPO.."install.lua <collector|display|radar|cannon|master|ship|fleetboard|playerradar>")
+  print("Usage: wget run "..REPO.."install.lua <collector|display|radar|cannon|gunner|master|ship|fleetboard|playerradar>")
   return
 end
 
