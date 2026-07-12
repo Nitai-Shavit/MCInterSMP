@@ -159,19 +159,32 @@ can't cross-talk with Part 2.
   and broadcasts it, plus best-effort pitch/roll, to fleetboard.lua.
 - **fleetboard.lua** — runs on the master ship's (Lightning's) own computer,
   wired to its monitor. Pure read-only board: one compact line per ship
-  (distance, computed from Lightning's own `gps.locate()` vs each ship's
-  reported position, plus pitch/roll), auto-paginating on a timer for a
-  small screen — works on a plain, non-Advanced monitor too, since paging
-  is timer-driven, not touch-driven. No terminal commands, no `parallel`,
-  no `read()` in the run loop at all — the only `read()` call in either
-  program is the one-time Ship ID prompt in `ship setup`.
+  (distance, an 8-point compass direction, and pitch/roll), auto-paginating
+  on a timer for a small screen — works on a plain, non-Advanced monitor
+  too, since paging is timer-driven, not touch-driven. No terminal
+  commands, no `parallel`, no `read()` in the run loop at all — the only
+  `read()` call in either program is the one-time Ship ID prompt in
+  `ship setup`.
+  - **Distance and direction** are both plain geometry from Lightning's own
+    `gps.locate()` vs each ship's reported position — no ship-orientation
+    API needed for either. `bearing()`/`compassLabel()` use the standard
+    real-world compass convention (0°=N, 90°=E, 180°=S, 270°=W, Minecraft's
+    north = -Z), independent of the yaw convention used for aiming
+    elsewhere in this repo.
 
 ### Unverified / to tune once tested in-game
 
 - Pitch/roll ("gimbal" reading) is attempted via CC:Sable's `sublevel` API
   as best-effort bonus telemetry — isolated in `shipPitchRoll()`, fails
   safe to `nil`/shown as `?` if unavailable, so a wrong guess there can't
-  break the rest of the board. If you have an actual Gimbal Sensor
+  break the rest of the board. CC:Sable's other global, `aero`/
+  `aerodynamics`, was checked and is NOT a fit for this — per its own docs
+  it's dimension-wide atmospheric pressure data, not per-object orientation,
+  so it isn't wired in here. Run **`ship probe`** on a ship computer (no
+  setup or rednet required) to dump whatever `sublevel`/`aero`/
+  `aerodynamics`/`quaternion` actually expose plus a `gps.locate()` test —
+  paste that output back to get `shipPitchRoll()` fixed to the real method
+  names instead of the current guess. If you have an actual Gimbal Sensor
   peripheral (Create: Avionics/Simulated) instead, swap `shipPitchRoll()`
   for a direct `peripheral.call(name, "getAngles")` — that method signature
   is confirmed from source, unlike the `sublevel` guess.

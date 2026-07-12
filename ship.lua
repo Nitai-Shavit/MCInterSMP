@@ -60,7 +60,30 @@ local function wirelessModem()
   end
 end
 
+-- Diagnostic: dump whatever CC:Sable (or any other mod) actually exposes as
+-- global tables, so figuring out the real sublevel/aero method names doesn't
+-- require typing a snippet at the Lua prompt — run "ship probe" and paste
+-- the output back. Doesn't need setup or rednet; purely local.
+local function probe()
+  local function dump(name, t)
+    if type(t) ~= "table" then print(name..": not available"); return end
+    print(name..":")
+    local keys = {}
+    for k in pairs(t) do keys[#keys+1] = tostring(k) end
+    table.sort(keys)
+    for _, k in ipairs(keys) do print("  "..k) end
+  end
+  dump("sublevel", _G.sublevel)
+  dump("aero", _G.aero)
+  dump("aerodynamics", _G.aerodynamics)
+  dump("quaternion", _G.quaternion)
+  local ok, x, y, z = pcall(gps.locate, GPS_TIMEOUT)
+  print(("gps.locate(): %s"):format(ok and x and ("%s, %s, %s"):format(x, y, z) or "failed"))
+end
+
 local arg = ...
+if arg == "probe" then probe(); return end
+
 local cfg = loadCfg()
 if arg == "setup" or not cfg then cfg = setup() end
 

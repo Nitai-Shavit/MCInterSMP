@@ -1,7 +1,9 @@
 -- fleetboard.lua  (CC:Tweaked) — runs on the master ship's (Lightning's) own
--- computer, wired to its monitor. Read-only armada viewer: distance (via
--- its own gps.locate() vs each ship's reported position) and pitch/roll for
--- every ship.lua node reporting in. No cannon control — see CLAUDE.md Part 3.
+-- computer, wired to its monitor. Read-only armada viewer: distance,
+-- compass direction (via its own gps.locate() vs each ship's reported
+-- position — plain geometry, no ship-orientation API needed), and best-
+-- effort pitch/roll for every ship.lua node reporting in. No cannon
+-- control — see CLAUDE.md Part 3.
 
 local PROTO       = "shipnet"
 local STALE       = 15     -- seconds before a ship's data is shown OFFLINE
@@ -34,6 +36,22 @@ local function dist(a, b)
   if not a or not b then return nil end
   local dx, dy, dz = a.x-b.x, a.y-b.y, a.z-b.z
   return math.sqrt(dx*dx + dy*dy + dz*dz)
+end
+
+-- Standard real-world compass bearing (0=N, 90=E, 180=S, 270=W) from `a` to
+-- `b`, using Minecraft's world axes (north = -Z, east = +X). This is plain
+-- geometry from the two GPS positions we already have -- no ship-orientation
+-- API needed, unlike pitch/roll below.
+local COMPASS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
+local function bearing(a, b)
+  if not a or not b then return nil end
+  local dx, dz = b.x - a.x, b.z - a.z
+  if dx == 0 and dz == 0 then return nil end
+  return (math.deg(math.atan2(dx, -dz)) + 360) % 360
+end
+local function compassLabel(deg)
+  if not deg then return "?" end
+  return COMPASS[math.floor((deg + 22.5) / 45) % 8 + 1]
 end
 
 -- One compact line per ship, auto-paginating on a timer if more ships don't
@@ -76,8 +94,11 @@ local function draw()
       mon.write(pad(pad(id, 8).." OFFLINE", W))
     else
       local d = dist(here, m.position)
+      local brg = bearing(here, m.position)
       mon.setTextColor(colors.white);     mon.write(pad(id, 8))
       mon.setTextColor(colors.lightGray); mon.write(pad(d and (math.floor(d).."m") or "?m", 6))
+      mon.setTextColor(colors.orange);    mon.write(pad(compassLabel(brg), 3))
+      mon.setTextColor(colors.lightGray)
       mon.write(("p%s r%s"):format(
         m.pitch and math.floor(m.pitch) or "?",
         m.roll  and math.floor(m.roll)  or "?"))
