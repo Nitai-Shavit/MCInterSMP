@@ -47,6 +47,7 @@ local function tiltColor(angle)
   elseif a <= 15 then return colors.yellow
   else return colors.red end
 end
+local function fmtAngle(v) return v and ("%.1f"):format(v) or "?" end
 
 -- Standard real-world compass bearing (0=N, 90=E, 180=S, 270=W) from `a` to
 -- `b`, using Minecraft's world axes (north = -Z, east = +X). This is plain
@@ -92,6 +93,13 @@ local function draw()
     return
   end
 
+  -- Name column widens to fit the longest ship ID actually on screen (plus
+  -- a guaranteed gap), instead of a fixed width that a long name could fill
+  -- exactly and butt up against the next column with no gap at all.
+  local maxId = 4
+  for _, id in ipairs(ids) do maxId = math.max(maxId, #id) end
+  local idW = math.min(maxId + 2, math.max(math.floor(W * 0.3), 6))
+
   local y = 2
   for i = start+1, math.min(start+rows, #ids) do
     local id = ids[i]
@@ -101,18 +109,18 @@ local function draw()
 
     if (now - entry.t) > STALE then
       mon.setTextColor(colors.gray)
-      mon.write(pad(pad(id, 8).." OFFLINE", W))
+      mon.write(pad(pad(id, idW).." OFFLINE", W))
     else
       local d = dist(here, m.position)
       local brg = bearing(here, m.position)
-      mon.setTextColor(colors.white);     mon.write(pad(id, 8))
+      mon.setTextColor(colors.white);     mon.write(pad(id, idW))
       mon.setTextColor(colors.lightGray); mon.write(pad(d and (math.floor(d).."m") or "?m", 6))
       mon.setTextColor(colors.orange);    mon.write(pad(compassLabel(brg), 3))
 
-      mon.setTextColor(colors.lightGray); mon.write("p")
-      mon.setTextColor(tiltColor(m.pitch)); mon.write(pad(m.pitch and math.floor(m.pitch) or "?", 3))
-      mon.setTextColor(colors.lightGray); mon.write(" r")
-      mon.setTextColor(tiltColor(m.roll));  mon.write(pad(m.roll and math.floor(m.roll) or "?", 3))
+      mon.setTextColor(colors.lightGray); mon.write(" Pitch:")
+      mon.setTextColor(tiltColor(m.pitch)); mon.write(pad(fmtAngle(m.pitch), 6))
+      mon.setTextColor(colors.lightGray); mon.write(" Roll:")
+      mon.setTextColor(tiltColor(m.roll));  mon.write(pad(fmtAngle(m.roll), 6))
     end
     y = y + 1
   end
