@@ -1,12 +1,13 @@
 # CLAUDE.md — Storage Monitor + Cannon Command (ComputerCraft: Tweaked)
 
-Three independent ComputerCraft subsystems for a Create-based modded
+Four independent ComputerCraft subsystems for a Create-based modded
 Minecraft SMP (NeoForge 1.21.1), written in Lua for **CC: Tweaked**: a
 storage-fill monitor (collector.lua/display.lua), a Create: Radars + Create:
-Big Cannons targeting system (radar.lua/cannon.lua/master.lua/ship.lua/
-fleetboard.lua, plus the standalone one-computer console gunner.lua), and a
-BlueMap-based player radar (playerradar.lua). Do not
-assume any other peripheral mod is present — see each section's Constraints.
+Big Cannons targeting system (radar.lua/cannon.lua/master.lua), a read-only
+GPS-based armada viewer (ship.lua/fleetboard.lua), a standalone one-computer
+cannon console (gunner.lua), and a BlueMap-based player radar
+(playerradar.lua). Do not assume any other peripheral mod is present — see
+each section's Constraints.
 
 **Naming note:** `radar.lua` (Part 2, Create: Radars cannon targeting) and
 `playerradar.lua` (Part 4, BlueMap player tracking) are unrelated programs
@@ -144,69 +145,45 @@ on ONE cannon, then the full aim loop), and expect to tune constants.
 - No collision/obstacle checking — a solved trajectory that clips terrain or
   a build in the way is not detected.
 
-## Part 3 — Fleet Cannon Control (GPS-aimed ships: Bolt I/II/III, master Lightning)
+## Part 3 — Armada Viewer (read-only, GPS-based)
 
-**Separate from Part 2.** Part 2 auto-aims stationary cannons using
-Create:Radars tracks. Part 3 is for named gun ships (e.g. Bolt I/II/III)
-whose cannons are computer-aimed at an operator-given point from the master
-ship (Lightning), on its own rednet protocol (`"shipnet"`) so it can't
-cross-talk with Part 2. Uses `gps.locate()` for live position instead of
-CC:Sable — works on a moving ship, no bridge-mod API uncertainty.
+**Separate from Part 2, and no cannon control.** An earlier version of this
+part actively aimed/fired ship-mounted cannons, but that's been dropped
+after running into a CC:Tweaked problem in testing — this is back to being
+a pure read-only viewer, on its own rednet protocol (`"shipnet"`) so it
+can't cross-talk with Part 2.
 
-- **ship.lua** — one per gun ship. Wired to each cannon's Auto Pitch/Yaw/Fire
-  Controllers (grouped under a Cannon ID at setup, same convention as
-  cannon.lua — blank reuses the last ID). `ship setup` asks the Ship ID
-  (e.g. "Bolt I"), then per cannon: barrel length and propellant charges
-  (mount position is NOT asked — it's read live via `gps.locate()` every
-  cycle, since the ship moves). `ship commission` is the same one-time typed
-  `YES` gate as master.lua's, scoped to this ship's own cannons — a cannon
-  stays under the radar mod's auto-aim until commissioned.
-
-  On receiving an `aim {x,y,z}` message it solves a firing solution **per
-  cannon** (same muzzle-offset brute-force ballistics as master.lua, using
-  its own live GPS position as the mount), commands the angles, then polls
-  `getAngle()` each cycle and **fires automatically** (`fire.keepFiring()`)
-  once both axes settle within `AIM_TOLERANCE_DEG`, or after `AIM_TIMEOUT`
-  as a safety valve so a cannon that can't quite settle doesn't wait
-  forever. There is no Cannon Ready Lamp on these ships, so "ready" is
-  derived from this settle check, not a redstone signal.
-
-- **fleetboard.lua** — runs on Lightning's own computer, wired to its
-  monitor. The monitor is a **read-only** board (one compact line per bolt:
-  enabled marker, distance via each side's own GPS position, and a cannon-
-  state summary), auto-paginating on a timer for a small screen. All
-  commands go through the computer's own **terminal**, running alongside the
-  monitor loop via `parallel.waitForAny` so typing doesn't freeze the
-  display: `list`, `enable <name>`, `disable <name>`, `aim <x> <y> <z>`.
-
-  **Safety gate:** `aim` is sent by targeted `rednet.send()` to each
-  enabled bolt's known computer ID — never broadcast — and every bolt
-  starts **disabled** on boot (the roster isn't saved to disk). A bolt left
-  behind on a previous session can't be commanded until you explicitly
-  `enable` it again this session, so it can't fire on a stale/accidental
-  command.
+- **ship.lua** — one per ship (e.g. "Bolt I"). No peripherals, no setup
+  beyond a Ship ID. Every `REFRESH` (5s) it reads its own live position via
+  `gps.locate()` (works on a moving ship — requires your GPS hosts to be up)
+  and broadcasts it, plus best-effort pitch/roll, to fleetboard.lua.
+- **fleetboard.lua** — runs on the master ship's (Lightning's) own computer,
+  wired to its monitor. Pure read-only board: one compact line per ship
+  (distance, computed from Lightning's own `gps.locate()` vs each ship's
+  reported position, plus pitch/roll), auto-paginating on a timer for a
+  small screen — works on a plain, non-Advanced monitor too, since paging
+  is timer-driven, not touch-driven. No terminal commands, no `parallel`,
+  no `read()` in the run loop at all — the only `read()` call in either
+  program is the one-time Ship ID prompt in `ship setup`.
 
 ### Unverified / to tune once tested in-game
 
-- `GRAVITY`/`DRAG`, the yaw convention, and the lack of collision checking
-  carry the same caveats as Part 2 — see that section.
-- `AIM_TOLERANCE_DEG` (1.5°) and `AIM_TIMEOUT` (8s) control when a settling
-  cannon is declared "close enough" and fires; tune both once you've seen
-  how precisely the Auto Pitch/Yaw Controllers actually track a commanded
-  angle in-game.
-- Ship pitch/roll is still attempted as optional bonus telemetry via the
-  same best-effort CC:Sable `sublevel` read as before (isolated in
-  `shipPitchRoll()`, fails to `nil`/`?` harmlessly) — it is **not** used in
-  the aiming math at all, only in whatever fleetboard.lua chooses to show,
-  so a wrong guess there can't affect firing accuracy.
+- Pitch/roll ("gimbal" reading) is attempted via CC:Sable's `sublevel` API
+  as best-effort bonus telemetry — isolated in `shipPitchRoll()`, fails
+  safe to `nil`/shown as `?` if unavailable, so a wrong guess there can't
+  break the rest of the board. If you have an actual Gimbal Sensor
+  peripheral (Create: Avionics/Simulated) instead, swap `shipPitchRoll()`
+  for a direct `peripheral.call(name, "getAngles")` — that method signature
+  is confirmed from source, unlike the `sublevel` guess.
 
 ## Part 5 — Gunner (standalone single-cannon console, CC:CBC cannon_mount)
 
 **Separate from Parts 2 and 3.** `gunner.lua` is a self-contained, ONE-computer
 aim-and-fire console for a single Create: Big Cannons cannon — no rednet, no
 master, no second computer. Where Part 2 auto-aims a cluster of cannons at
-radar tracks and Part 3 fleet-commands gun ships, Part 5 is the simple "type a
-coordinate, it aims and shoots" operator tool the SMP originally asked for.
+radar tracks and Part 3 is a read-only viewer with no cannon control at all,
+Part 5 is the simple "type a coordinate, it aims and shoots" operator tool
+the SMP originally asked for.
 
 - **Position:** `gps.locate()` every shot, so it works on a moving contraption.
   The cannon MOUNT is derived as `gps + offset`, where the offset
