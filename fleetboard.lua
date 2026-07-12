@@ -1,9 +1,10 @@
 -- fleetboard.lua  (CC:Tweaked) — runs on the master ship's (Lightning's) own
 -- computer, wired to its monitor. Read-only armada viewer: distance,
 -- compass direction (via its own gps.locate() vs each ship's reported
--- position — plain geometry, no ship-orientation API needed), and best-
--- effort pitch/roll for every ship.lua node reporting in. No cannon
--- control — see CLAUDE.md Part 3.
+-- position — plain geometry, no ship-orientation API needed), and pitch/
+-- roll (from each ship's Gimbal Sensor, color-coded green/yellow/red by
+-- tilt severity) for every ship.lua node reporting in. No cannon control —
+-- see CLAUDE.md Part 3.
 
 local PROTO       = "shipnet"
 local STALE       = 15     -- seconds before a ship's data is shown OFFLINE
@@ -36,6 +37,15 @@ local function dist(a, b)
   if not a or not b then return nil end
   local dx, dy, dz = a.x-b.x, a.y-b.y, a.z-b.z
   return math.sqrt(dx*dx + dy*dy + dz*dz)
+end
+
+-- Tilt severity: green under 5deg, yellow 5-15deg, red over 15deg.
+local function tiltColor(angle)
+  if not angle then return colors.gray end
+  local a = math.abs(angle)
+  if a < 5 then return colors.lime
+  elseif a <= 15 then return colors.yellow
+  else return colors.red end
 end
 
 -- Standard real-world compass bearing (0=N, 90=E, 180=S, 270=W) from `a` to
@@ -98,10 +108,11 @@ local function draw()
       mon.setTextColor(colors.white);     mon.write(pad(id, 8))
       mon.setTextColor(colors.lightGray); mon.write(pad(d and (math.floor(d).."m") or "?m", 6))
       mon.setTextColor(colors.orange);    mon.write(pad(compassLabel(brg), 3))
-      mon.setTextColor(colors.lightGray)
-      mon.write(("p%s r%s"):format(
-        m.pitch and math.floor(m.pitch) or "?",
-        m.roll  and math.floor(m.roll)  or "?"))
+
+      mon.setTextColor(colors.lightGray); mon.write("p")
+      mon.setTextColor(tiltColor(m.pitch)); mon.write(pad(m.pitch and math.floor(m.pitch) or "?", 3))
+      mon.setTextColor(colors.lightGray); mon.write(" r")
+      mon.setTextColor(tiltColor(m.roll));  mon.write(pad(m.roll and math.floor(m.roll) or "?", 3))
     end
     y = y + 1
   end

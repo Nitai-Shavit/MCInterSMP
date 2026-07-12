@@ -1,37 +1,28 @@
 -- ship.lua  (CC:Tweaked) — run ONE per ship in the armada (e.g. "Bolt I").
 -- Read-only telemetry only — no cannon control. Uses gps.locate() for live
 -- position (works on a moving ship, no CC:Sable dependency for that part)
--- and broadcasts it, plus best-effort pitch/roll, to fleetboard.lua on the
--- master ship every REFRESH seconds.
+-- and a wired Gimbal Sensor peripheral for pitch/roll, broadcasting both to
+-- fleetboard.lua on the master ship every REFRESH seconds.
 
 local PROTO, CFGFILE, REFRESH = "shipnet", "ship.cfg", 5
 local GPS_TIMEOUT = 2
+local GIMBAL_SIDE = "top"   -- side the Gimbal Sensor peripheral is wired on
+
+-- getAngles() returns {xAngle, zAngle}: X = side axis (roll), Z = main axis
+-- (pitch) — confirmed peripheral, not a guess. Fails safe to nil/nil if the
+-- gimbal isn't present so the rest of the program still works either way.
+local function shipPitchRoll()
+  local ok, gimbal = pcall(peripheral.wrap, GIMBAL_SIDE)
+  if not ok or not gimbal then return nil, nil end
+  local ok2, angles = pcall(gimbal.getAngles)
+  if not ok2 or type(angles) ~= "table" then return nil, nil end
+  local xAngle, zAngle = angles[1], angles[2]
+  return zAngle, xAngle   -- pitch, roll
+end
 
 local function shipPosition()
   local ok, x, y, z = pcall(gps.locate, GPS_TIMEOUT)
   if ok and x then return { x = x, y = y, z = z } end
-end
-
--- Best-effort pitch/roll ("gimbal" reading) via CC:Sable's `sublevel` API —
--- see CLAUDE.md Part 3 for the unverified-API caveat. Fails safe to nil/nil
--- if unavailable so the rest of the program still works either way.
-local function quaternionLib()
-  if type(require) == "function" then
-    local ok, lib = pcall(require, "quaternion")
-    if ok and lib then return lib end
-  end
-  return _G.quaternion
-end
-
-local function shipPitchRoll()
-  if not sublevel then return nil, nil end
-  local ok, q = pcall(sublevel.getRotation)
-  if not ok or not q then return nil, nil end
-  local quat = quaternionLib()
-  if not quat then return nil, nil end
-  local ok2, euler = pcall(quat.toEuler, q)
-  if not ok2 or type(euler) ~= "table" then return nil, nil end
-  return euler.pitch, euler.roll
 end
 
 local function loadCfg()

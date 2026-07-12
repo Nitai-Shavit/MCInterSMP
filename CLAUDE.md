@@ -153,18 +153,25 @@ after running into a CC:Tweaked problem in testing — this is back to being
 a pure read-only viewer, on its own rednet protocol (`"shipnet"`) so it
 can't cross-talk with Part 2.
 
-- **ship.lua** — one per ship (e.g. "Bolt I"). No peripherals, no setup
-  beyond a Ship ID. Every `REFRESH` (5s) it reads its own live position via
-  `gps.locate()` (works on a moving ship — requires your GPS hosts to be up)
-  and broadcasts it, plus best-effort pitch/roll, to fleetboard.lua.
+- **ship.lua** — one per ship (e.g. "Bolt I"). No setup beyond a Ship ID.
+  Every `REFRESH` (5s) it reads its own live position via `gps.locate()`
+  (works on a moving ship — requires your GPS hosts to be up), plus
+  pitch/roll from a **Gimbal Sensor peripheral wired on `GIMBAL_SIDE`**
+  (`"top"` by default — one is expected on every ship computer). Broadcasts
+  both to fleetboard.lua.
+  - `gimbal.getAngles()` returns `{xAngle, zAngle}`: X = side axis (roll),
+    Z = main axis (pitch) — confirmed from in-game testing, not a guess.
+    `shipPitchRoll()` fails safe to `nil`/`nil` if the peripheral isn't
+    present, so a ship without one still reports position fine.
 - **fleetboard.lua** — runs on the master ship's (Lightning's) own computer,
   wired to its monitor. Pure read-only board: one compact line per ship
-  (distance, an 8-point compass direction, and pitch/roll), auto-paginating
-  on a timer for a small screen — works on a plain, non-Advanced monitor
-  too, since paging is timer-driven, not touch-driven. No terminal
-  commands, no `parallel`, no `read()` in the run loop at all — the only
-  `read()` call in either program is the one-time Ship ID prompt in
-  `ship setup`.
+  (distance, an 8-point compass direction, and pitch/roll — each axis
+  color-coded green under 5°, yellow 5–15°, red past 15°, via
+  `tiltColor()`), auto-paginating on a timer for a small screen — works on
+  a plain, non-Advanced monitor too, since paging is timer-driven, not
+  touch-driven. No terminal commands, no `parallel`, no `read()` in the run
+  loop at all — the only `read()` call in either program is the one-time
+  Ship ID prompt in `ship setup`.
   - **Distance and direction** are both plain geometry from Lightning's own
     `gps.locate()` vs each ship's reported position — no ship-orientation
     API needed for either. `bearing()`/`compassLabel()` use the standard
@@ -174,20 +181,15 @@ can't cross-talk with Part 2.
 
 ### Unverified / to tune once tested in-game
 
-- Pitch/roll ("gimbal" reading) is attempted via CC:Sable's `sublevel` API
-  as best-effort bonus telemetry — isolated in `shipPitchRoll()`, fails
-  safe to `nil`/shown as `?` if unavailable, so a wrong guess there can't
-  break the rest of the board. CC:Sable's other global, `aero`/
-  `aerodynamics`, was checked and is NOT a fit for this — per its own docs
-  it's dimension-wide atmospheric pressure data, not per-object orientation,
-  so it isn't wired in here. Run **`ship probe`** on a ship computer (no
-  setup or rednet required) to dump whatever `sublevel`/`aero`/
-  `aerodynamics`/`quaternion` actually expose plus a `gps.locate()` test —
-  paste that output back to get `shipPitchRoll()` fixed to the real method
-  names instead of the current guess. If you have an actual Gimbal Sensor
-  peripheral (Create: Avionics/Simulated) instead, swap `shipPitchRoll()`
-  for a direct `peripheral.call(name, "getAngles")` — that method signature
-  is confirmed from source, unlike the `sublevel` guess.
+- Tilt-color thresholds (green <5°, yellow 5–15°, red >15°) are a first
+  guess at what counts as "too unstable" — adjust `tiltColor()` in
+  fleetboard.lua once you've seen real values during normal sailing vs.
+  actually risky tilt.
+- `ship probe` (no setup/rednet required) still exists as a general
+  diagnostic — dumps `sublevel`/`aero`/`aerodynamics`/`quaternion` plus a
+  `gps.locate()` test — useful if you ever need to inspect other globals,
+  though it's no longer needed for pitch/roll now that the Gimbal Sensor
+  peripheral is confirmed working.
 
 ## Part 5 — Gunner (standalone single-cannon console, CC:CBC cannon_mount)
 
