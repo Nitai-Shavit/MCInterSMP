@@ -241,16 +241,22 @@ coordinate, it aims and shoots" operator tool the SMP originally asked for.
   the first thing to run when diagnosing a non-moving axis.
 - **Ballistics:** same brute-force solver as master.lua (`solvePitches` scans
   the configured pitch range, simulates each candidate tick-by-tick with
-  gravity + drag, bisects around sign changes), but the constants live in
-  `gunner.cfg` and default to the community CBC calculator's values —
-  **gravity 0.05 b/t², drag 1%/t, muzzle speed = charges x 2 b/t** — instead of
-  master.lua's borrowed-from-rockets 0.04. Yaw uses Minecraft's real convention
-  (`atan2(-dx, dz)`; 0=+Z south) and the muzzle-offset math is self-consistent
-  with it; `yawOffset`/`pitchOffset` in the cfg are calibration fudge factors
-  for when a live test shot lands off.
-- **Setup asks** the un-reportable facts: mount coords, barrel length, charges,
-  blocks/tick per charge, and the elevation limits (`pitchMax` up, `pitchMin` —
-  negative if the mount can depress below horizontal, 0 if level-or-up only).
+  gravity + drag, bisects around sign changes), constants in `gunner.cfg`
+  default to the community CBC calculator's values — **gravity 0.05 b/t², drag
+  1%/t, muzzle speed = charges x 2 b/t**. **Yaw is emitted in the Create: Radars
+  controller's own frame — `atan2(dz, dx) + 90`** (verified from the mod source
+  `computeYawToTargetDeg`; +X=90, +Z=180, -X=270, -Z=0), which is what
+  `setTargetAngle` consumes, so the computer and the mod agree. The muzzle
+  offset is computed straight from the horizontal unit vector, independent of
+  that frame; `yawOffset`/`pitchOffset` in the cfg are residual calibration.
+- **Setup is deliberately lean** — it asks only the cannon-specific,
+  un-reportable facts (mount coords, barrel length, charges, firing side) and
+  records which peripheral is the pitch vs. yaw controller (`pitchPeri`/
+  `yawPeri`) so aiming can't silently miss an axis. Everything else (per-charge
+  velocity, gravity, drag, `pitchMin -30`/`pitchMax 60`, slew, calibration
+  offsets) defaults to CBC values in `gunner.cfg` and is edited there directly.
+  A runtime `swap` command flips the pitch/yaw assignment if it aims the wrong
+  axis.
 - **Firing** is automatic once the cannon settles on the commanded angles
   (`waitSettle` polls the backend's angle telemetry, or waits a fixed estimate
   if the backend reports none), with a 3-second **press-any-key-to-abort**
@@ -259,10 +265,10 @@ coordinate, it aims and shoots" operator tool the SMP originally asked for.
   and relaunches if it changed (guarded by a `noupdate` sentinel arg), on top
   of install.lua's boot-time re-pull — so a deployed gunner always runs current.
 - **Commands:** `aim <x y z>`, `radar` (pick a live Create: Radars track),
-  `test yaw|pitch <deg>` (prove an axis moves), `arc` (toggle shallow/steep
-  preferred arc), `angles <y p>` (manual), `fire`/`hold`, `assemble`/
-  `disassemble`, `info`, `setup`, `wiring`, `quit`. `gunner wiring` prints the
-  full hookup guide.
+  `test yaw|pitch <deg>` (prove an axis moves), `swap` (flip pitch/yaw
+  assignment), `angles <y p>` (manual), `arc` (toggle shallow/steep arc),
+  `fire`/`hold`, `assemble`/`disassemble`, `info`, `setup`, `wiring`, `quit`.
+  `gunner wiring` prints the full hookup guide.
 
 ### Unverified / to tune once tested in-game
 
