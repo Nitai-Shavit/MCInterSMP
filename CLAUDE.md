@@ -212,14 +212,33 @@ coordinate, it aims and shoots" operator tool the SMP originally asked for.
   The cannon MOUNT is derived as `gps + offset`, where the offset
   (`MOUNT - COMPUTER`, read off F3) is captured once in `gunner setup`. If GPS
   is unavailable it falls back to the static mount coords from setup.
-- **Backend auto-detect (two routes):** prefers the **CC:CBC `cannon_mount`**
-  peripheral (`setComputerControl`/`setTargetAngles`/`setTargetYaw`/
-  `setTargetPitch`/`fire`/`assemble`/`getInfo`, angles in degrees, yaw `0..360`
-  matching in-game). Falls back to Create: Radars' **Auto Pitch/Yaw + Fire
-  controllers** (`setAngle`/`getAngle` + `fireOn`/`fireOff`/`setPowered`) so it
-  also drives a cannon wired the Part-2 way. This is the only program in the
-  repo that uses CC:CBC's `cannon_mount` directly rather than the radar-mod
-  controllers.
+- **Aiming backend auto-detect (two routes):** primary is Create: Radars'
+  **Auto Pitch + Auto Yaw Controllers** (`setAngle`/`getAngle`/`stopAuto`).
+  Critical detail confirmed from the mod source
+  (`Arsenalists-of-Create/Create-Radar`): `setAngle` only sets a *target*, and
+  the mod's own auto-aim (WeaponFiringControl) **overrides the commanded angle
+  every tick unless `stopAuto()` was called** — that was why a naive
+  `setAngle`-only version moved pitch but **not yaw**. gunner calls `stopAuto()`
+  on both axes before each aim (`setTargetAngle` re-arms `isRunning`, so this
+  does not stop the axis from tracking). Also, `getAngle()` returns the *target*
+  we set, **not** the live barrel angle, so there is no true settle telemetry
+  on this route — see slew wait below. The alternative route is the **CC:CBC
+  `cannon_mount`** peripheral (`setComputerControl`/`setTargetAngles`/`fire`/
+  `assemble`/`getInfo`) if that mod is present instead.
+- **Firing is separate from aiming.** Default is a **redstone pulse** from a
+  chosen side of the computer (wired to the cannon's firing through a redstone
+  relay / igniter) — no Fire Controller peripheral required, since the SMP's
+  cannon fires off redstone. A Create: Radars **Fire Controller** peripheral
+  (`fireOn`/`setPowered`) is a selectable alternative in setup.
+- **Slew wait (no live angle):** because the radar controllers report only the
+  commanded target, gunner can't detect when the barrel physically arrives, so
+  it waits a fixed, configurable `slewSeconds` (default 4) for rotation to
+  finish before firing. On the CC:CBC route it settles early if `getInfo`
+  exposes a real angle. The mount still needs rotational (kinetic) power for
+  the controllers to physically turn it.
+- **`test` command** commands a single raw axis angle (`test yaw <deg>` /
+  `test pitch <deg>`, after `stopAuto`) to verify each axis physically moves —
+  the first thing to run when diagnosing a non-moving axis.
 - **Ballistics:** same brute-force solver as master.lua (`solvePitches` scans
   the configured pitch range, simulates each candidate tick-by-tick with
   gravity + drag, bisects around sign changes), but the constants live in
@@ -240,9 +259,10 @@ coordinate, it aims and shoots" operator tool the SMP originally asked for.
   and relaunches if it changed (guarded by a `noupdate` sentinel arg), on top
   of install.lua's boot-time re-pull — so a deployed gunner always runs current.
 - **Commands:** `aim <x y z>`, `radar` (pick a live Create: Radars track),
-  `arc` (toggle shallow/steep preferred arc), `angles <y p>` (manual),
-  `fire`/`hold`, `assemble`/`disassemble`, `info`, `setup`, `wiring`, `quit`.
-  `gunner wiring` prints the full hookup guide.
+  `test yaw|pitch <deg>` (prove an axis moves), `arc` (toggle shallow/steep
+  preferred arc), `angles <y p>` (manual), `fire`/`hold`, `assemble`/
+  `disassemble`, `info`, `setup`, `wiring`, `quit`. `gunner wiring` prints the
+  full hookup guide.
 
 ### Unverified / to tune once tested in-game
 
@@ -250,11 +270,11 @@ coordinate, it aims and shoots" operator tool the SMP originally asked for.
   best-effort. If a shot lands short/long, tune `gravity`/`drag` in
   `gunner.cfg`; if it aims a fixed amount off in bearing/elevation, set
   `yawOffset`/`pitchOffset`. No obstacle/terrain-collision checking.
-- The CC:CBC `getInfo()` field names read for angle telemetry
-  (`yaw`/`currentYaw`/`cannonYaw`, likewise pitch) are a best guess; if
-  `waitSettle` never reports "on target" it's falling back to the fixed-time
-  wait, which still fires — verify the real field names with the `info`
-  command and adjust `readAngles` if you want true settle detection.
+- Radar controllers give no live barrel angle, so firing timing rests on
+  `slewSeconds`; if the barrel hasn't finished rotating when it fires, raise it.
+  On the CC:CBC route the `getInfo()` field names read for real-angle settle
+  (`yaw`/`currentYaw`/`cannonYaw`, likewise pitch) are a best guess — verify
+  with the `info` command and adjust `readAngles` if early-settle never trips.
 
 ## Part 4 — Player Radar (BlueMap)
 

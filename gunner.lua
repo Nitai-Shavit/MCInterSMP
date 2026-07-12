@@ -12,17 +12,25 @@
 --     charges, pitch limits) once in setup,
 --   * on a target coordinate, brute-force-solves yaw + pitch (gravity + drag,
 --     no closed form exists for CBC shells — same approach as master.lua),
---   * commands the cannon and fires automatically once it settles on aim.
+--   * commands the cannon and fires automatically once it has slewed to aim.
 --
--- Aiming/firing backend is auto-detected:
---   * CC:CBC  "cannon_mount" peripheral (setComputerControl/setTargetAngles/
---     fire/assemble) — the direct Create: Big Cannons route; preferred.
---   * fallback: Create: Radars Auto Pitch/Yaw + Fire controllers
---     (setAngle/getAngle + fireOn/fireOff/setPowered), so it also works if
---     that's how the cannon is wired.
+-- Aiming backend is auto-detected:
+--   * Create: Radars Auto Pitch + Auto Yaw Controllers (setAngle/getAngle/
+--     stopAuto). IMPORTANT: setAngle alone is overridden by the radar mod's
+--     own auto-aim (WFC); this program calls stopAuto() first so the computer
+--     actually holds control — that is what makes yaw move. (setAngle re-arms
+--     the controller, so stopAuto does not stop the axis from tracking.)
+--   * or the CC:CBC "cannon_mount" peripheral (setComputerControl/
+--     setTargetAngles/fire) if that mod is present instead.
+--
+-- Firing is separate from aiming and is auto/explicitly configured:
+--   * REDSTONE (default): this computer pulses a redstone side wired to the
+--     cannon's firing (e.g. through a redstone relay / igniter). No Fire
+--     Controller peripheral needed.
+--   * or a Create: Radars Fire Controller peripheral (fireOn/setPowered).
 --
 -- Wiring guide:  run  gunner wiring
--- Re-run setup: run  gunner setup
+-- Re-run setup:  run  gunner setup
 
 local RAW     = "https://raw.githubusercontent.com/Nitai-Shavit/MCInterSMP/main/gunner.lua"
 local CFGFILE = "gunner.cfg"
@@ -31,6 +39,7 @@ local CFGFILE = "gunner.cfg"
 -- gravity 0.05 b/t, drag 1%/t, and 2 b/t of muzzle speed per propellant charge
 -- match the community CBC ballistic calculator (initialSpeed = charges * 2).
 local GRAV_DEFAULT, DRAG_DEFAULT, VPC_DEFAULT = 0.05, 0.01, 2.0
+local SIDES = { top = true, bottom = true, left = true, right = true, front = true, back = true }
 
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 
@@ -100,7 +109,7 @@ end
 local function fmt(n) return n and tostring(math.floor(n + 0.5)) or "?" end
 
 -- ===========================================================================
--- Peripheral backend (aiming + firing), auto-detected.
+-- Peripheral backend (aiming only — firing is handled separately below).
 -- ===========================================================================
 local function hasM(name, m)
   for _, x in ipairs(peripheral.getMethods(name) or {}) do if x == m then return true end end
@@ -112,7 +121,8 @@ local function makeCbcBackend(name)
   local p = peripheral.wrap(name)
   pcall(function() p.setComputerControl(true) end)
   return {
-    kind = "cbc", name = name,
+    kind = "cbc", name = name, pitchName = nil, yawName = nil, realAngles = true,
+    commission = function() pcall(function() p.setComputerControl(true) end) end,
     aim = function(yaw, pitch)
       pcall(function() p.setComputerControl(true) end)
       if not pcall(function() p.setTargetAngles(yaw, pitch) end) then
@@ -120,6 +130,7 @@ local function makeCbcBackend(name)
         pcall(function() p.setTargetPitch(pitch) end)
       end
     end,
+    -- cannon_mount getInfo may expose the ACTUAL angle; try common field names.
     readAngles = function()
       local ok, info = pcall(function() return p.getInfo() end)
       if ok and type(info) == "table" then
@@ -127,29 +138,42 @@ local function makeCbcBackend(name)
                info.pitch or info.currentPitch or info.cannonPitch
       end
     end,
-    fire = function(on) pcall(function() p.fire(on) end) end,
+    hasFirePeripheral = true,
+    firePeripheral = function(on) pcall(function() p.fire(on) end) end,
     assemble = function(on) return pcall(function() p.assemble(on) end) end,
     info = function() local ok, i = pcall(function() return p.getInfo() end); if ok then return i end end,
   }
 end
 
--- Create: Radars Auto Pitch/Yaw controllers + Fire controller (the same
--- peripherals cannon.lua/master.lua drive), for when a CBC cannon_mount isn't
--- present. Pitch/yaw share a method set, so we tell them apart by type name.
+-- Create: Radars Auto Pitch/Yaw Controllers (+ optional Fire Controller).
+-- setAngle sets a TARGET; the radar mod's auto-aim (WeaponFiringControl) will
+-- override it every tick UNLESS stopAuto() has been called — so commission()
+-- calls stopAuto() on both axes, and we (re)call it before every aim. getAngle
+-- returns the TARGET we set, not the live barrel angle, so readAngles() returns
+-- nil: there is no true angle telemetry here, so settling is time-based.
 local function makeRadarBackend(pn, yn, fn)
+  local function commission()
+    if pn then pcall(peripheral.call, pn, "stopAuto") end
+    if yn then pcall(peripheral.call, yn, "stopAuto") end
+  end
   return {
-    kind = "radar", name = (yn or pn),
+    kind = "radar", name = (yn or pn), pitchName = pn, yawName = yn, fireName = fn,
+    realAngles = false,
+    commission = commission,
     aim = function(yaw, pitch)
+      commission()  -- take both axes off the mod's auto-aim first (fixes yaw)
       if yn then pcall(peripheral.call, yn, "setAngle", yaw) end
       if pn then pcall(peripheral.call, pn, "setAngle", pitch) end
     end,
-    readAngles = function()
+    readAngles = function() return nil, nil end,       -- no live barrel telemetry
+    targetAngles = function()                          -- for display only
       local y, p
       if yn then local ok, v = pcall(peripheral.call, yn, "getAngle"); if ok then y = v end end
       if pn then local ok, v = pcall(peripheral.call, pn, "getAngle"); if ok then p = v end end
       return y, p
     end,
-    fire = function(on)
+    hasFirePeripheral = fn ~= nil,
+    firePeripheral = function(on)
       if not fn then return end
       if on then pcall(peripheral.call, fn, "fireOn"); pcall(peripheral.call, fn, "setPowered", true)
       else       pcall(peripheral.call, fn, "fireOff"); pcall(peripheral.call, fn, "setPowered", false) end
@@ -193,9 +217,6 @@ end
 -- ===========================================================================
 local cfg  -- populated after setup/load; ballistics read constants off it.
 
--- World point the shell actually leaves from: the mount, offset by barrel
--- length along the barrel facing (NOT the pivot). Uses Minecraft's yaw
--- convention: 0=+Z (south), 90=-X (west), so forward = (-sin, +cos) in (x,z).
 local function muzzlePos(mount, barrel, yawDeg, pitchDeg)
   local yaw, pitch = math.rad(yawDeg), math.rad(pitchDeg)
   local dx = -math.sin(yaw) * math.cos(pitch)
@@ -204,8 +225,6 @@ local function muzzlePos(mount, barrel, yawDeg, pitchDeg)
   return { x = mount.x + dx * barrel, y = mount.y + dy * barrel, z = mount.z + dz * barrel }
 end
 
--- Height a shell reaches once it has travelled `dist` blocks horizontally, or
--- nil if it never gets there (falls short / stalls in the air first).
 local function heightAtDistance(speed, pitchDeg, dist)
   local rad = math.rad(pitchDeg)
   local vh, vy = speed * math.cos(rad), speed * math.sin(rad)
@@ -220,13 +239,9 @@ local function heightAtDistance(speed, pitchDeg, dist)
   return nil
 end
 
--- Scan the cannon's usable pitch range, refining every sign change of
--- (height - dh) by bisection. Returns viable pitches ascending, typically
--- {shallow, steep}, or {} if the target is out of range at this speed.
 local function solvePitches(speed, dist, dh)
   local sols, prevErr, prevDeg = {}, nil, nil
-  local lo, hi = cfg.pitchMin, cfg.pitchMax
-  for deg = lo, hi, 1 do
+  for deg = cfg.pitchMin, cfg.pitchMax, 1 do
     local h = heightAtDistance(speed, deg, dist)
     local err = h and (h - dh) or nil
     if err and prevErr and ((prevErr < 0 and err >= 0) or (prevErr > 0 and err <= 0)) then
@@ -244,8 +259,6 @@ local function solvePitches(speed, dist, dh)
   return sols
 end
 
--- Solve yaw + pitch options to hit `target` from `mount`. Iterates a few times
--- because the muzzle point itself depends on the yaw/pitch being solved for.
 local function solveAim(mount, target)
   local yaw = math.deg(atan2(-(target.x - mount.x), target.z - mount.z))
   if yaw < 0 then yaw = yaw + 360 end
@@ -267,8 +280,6 @@ end
 -- ===========================================================================
 -- Position
 -- ===========================================================================
--- Cannon mount position: gps + stored offset (works when moving); if GPS is
--- unavailable, fall back to the static mount coords captured in setup.
 local function currentMount()
   local cx, cy, cz = gps.locate(2)
   if cx then
@@ -281,8 +292,45 @@ local function currentMount()
 end
 
 -- ===========================================================================
+-- Firing (separate from aiming). Redstone by default; Fire Controller optional.
+-- ===========================================================================
+local backend
+
+local function fireSet(on)
+  if cfg.fireMode == "peripheral" and backend and backend.hasFirePeripheral then
+    backend.firePeripheral(on)
+  else
+    redstone.setOutput(cfg.fireSide or "back", on)
+  end
+end
+
+local function firePulse()
+  fireSet(true); sleep(cfg.firePulse or 0.5); fireSet(false)
+end
+
+-- ===========================================================================
 -- Setup wizard
 -- ===========================================================================
+local function firingSetup(c)
+  print("\n-- Firing method --")
+  local peri = findBackend()
+  local hasFC = peri and peri.hasFirePeripheral
+  print("  1) Redstone pulse from THIS computer (into a redstone relay/igniter) [default]")
+  print("  2) Create: Radars Fire Controller peripheral" .. (hasFC and " (detected)" or " (not detected)"))
+  local choice = ask("  Choose 1 or 2: ", (c.fireMode == "peripheral") and "2" or "1")
+  if choice == "2" then
+    c.fireMode = "peripheral"
+    print("  Firing via the Fire Controller peripheral.")
+  else
+    c.fireMode = "redstone"
+    print("  Which SIDE of the computer outputs the firing redstone?")
+    print("  (top / bottom / left / right / front / back — the side wired to the relay)")
+    local s = ask("  Side: ", c.fireSide or "back"):lower()
+    c.fireSide = SIDES[s] and s or "back"
+  end
+  c.firePulse = askNum("  Fire pulse length in seconds (default 0.5): ", c.firePulse or 0.5)
+end
+
 local function setup(existing)
   local c = existing or {}
   print("=== Gunner setup (Create: Big Cannons) ===")
@@ -322,6 +370,14 @@ local function setup(existing)
   c.pitchMax = askNum("  Max pitch degrees up (e.g. 60): ", c.pitchMax or 60)
   c.pitchMin = askNum("  Min pitch degrees (e.g. -30, or 0): ", c.pitchMin or 0)
 
+  firingSetup(c)
+
+  print("\n-- Slew wait --")
+  print("  These controllers report no live barrel angle, so gunner waits a")
+  print("  fixed time for the cannon to rotate to aim before firing. Set it long")
+  print("  enough that the barrel always reaches the angle first.")
+  c.slewSeconds = askNum("  Seconds to wait before firing (default 4): ", c.slewSeconds or 4)
+
   print("\n-- Ballistics constants (press Enter to keep CBC defaults) --")
   c.gravity = askNum("  Gravity blocks/tick^2 (default 0.05): ", c.gravity or GRAV_DEFAULT)
   c.drag    = askNum("  Drag fraction/tick (default 0.01): ", c.drag or DRAG_DEFAULT)
@@ -329,9 +385,6 @@ local function setup(existing)
   print("\n-- Calibration offsets (leave 0; adjust only if shots aim off) --")
   c.yawOffset   = askNum("  Yaw offset deg (default 0): ", c.yawOffset or 0)
   c.pitchOffset = askNum("  Pitch offset deg (default 0): ", c.pitchOffset or 0)
-  c.settleTol   = c.settleTol or 1.5
-  c.settleTimeout = c.settleTimeout or 8
-  c.firePulse   = c.firePulse or 0.5
   c.prefArc     = c.prefArc or "low"
 
   saveCfg(c)
@@ -342,8 +395,6 @@ end
 -- ===========================================================================
 -- Aim & fire
 -- ===========================================================================
-local backend
-
 local function pickPitch(sols)
   local inRange = {}
   for _, p in ipairs(sols) do
@@ -354,25 +405,26 @@ local function pickPitch(sols)
   return inRange[1], inRange
 end
 
--- Wait until the cannon settles on the commanded angles, or timeout. If the
--- backend gives no angle telemetry, wait out a fixed estimate instead.
-local function waitSettle(tyaw, tpitch)
-  local deadline = os.clock() + cfg.settleTimeout
-  while os.clock() < deadline do
-    local y, p = backend.readAngles()
-    if y and p then
-      local dy = math.abs(((y - tyaw + 540) % 360) - 180)
-      local dp = math.abs(p - tpitch)
-      if dy <= cfg.settleTol and dp <= cfg.settleTol then return true end
-    else
-      sleep(cfg.settleTimeout); return false
+-- Wait for the cannon to reach the commanded angles. With real telemetry
+-- (cannon_mount) settle early when close; otherwise wait the fixed slew time.
+local function slewWait(tyaw, tpitch)
+  local wait = cfg.slewSeconds or 4
+  if backend and backend.realAngles then
+    local deadline = os.clock() + wait
+    while os.clock() < deadline do
+      local y, p = backend.readAngles()
+      if y and p then
+        local dy = math.abs(((y - tyaw + 540) % 360) - 180)
+        if dy <= 1.5 and math.abs(p - tpitch) <= 1.5 then return true end
+      end
+      sleep(0.2)
     end
-    sleep(0.2)
+    return false
   end
+  sleep(wait)
   return false
 end
 
--- Automatic fire with a short abort window so a bad solution can be stopped.
 local function confirmFire(secs)
   print(("Firing in %ds — press any key to ABORT."):format(secs))
   local t = os.startTimer(secs)
@@ -384,7 +436,7 @@ local function confirmFire(secs)
 end
 
 local function engage(tx, ty, tz)
-  if not backend then print("No cannon peripheral wired — run: gunner wiring"); return end
+  if not backend then print("No cannon aiming peripheral wired — run: gunner wiring"); return end
   local mount, live = currentMount()
   if not mount then print("No GPS fix and no saved mount — run: gunner setup"); return end
   if not live then print("(GPS unavailable — using static mount from setup)") end
@@ -414,10 +466,10 @@ local function engage(tx, ty, tz)
   local aimYaw, aimPitch = yaw + cfg.yawOffset, pitch + cfg.pitchOffset
   backend.aim(aimYaw, aimPitch)
   print("Slewing to aim...")
-  if waitSettle(aimYaw, aimPitch) then print("On target.") else print("Aim not fully settled (timeout) — proceeding.") end
+  if slewWait(aimYaw, aimPitch) then print("On target.") else print("Slew wait elapsed — proceeding.") end
 
   if confirmFire(3) then
-    backend.fire(true); sleep(cfg.firePulse); backend.fire(false)
+    firePulse()
     print("FIRED.")
   end
 end
@@ -448,26 +500,33 @@ end
 local function wiring()
   print("=== Gunner — what to hook up ===")
   print("")
-  print("1. COMPUTER (Advanced or normal) with a WIRED MODEM on one side,")
-  print("   connected by networking cable to the cannon's control peripheral.")
+  print("1. COMPUTER with a WIRED MODEM, connected by networking cable to the")
+  print("   cannon's Auto Pitch Controller and Auto Yaw Controller (right-click")
+  print("   each with the modem, or place a full-block wired modem on them).")
   print("")
-  print("2. CANNON control — either route works, gunner auto-detects:")
-  print("   a) CC:CBC 'Cannon Mount' peripheral on the Create: Big Cannons")
-  print("      cannon mount (preferred). gunner calls setComputerControl(true)")
-  print("      so the mount takes computer aim instead of a control shaft.")
-  print("   b) Create: Radars Auto Pitch Controller + Auto Yaw Controller +")
-  print("      Fire Controller, one each, all on the wired network.")
+  print("2. AIMING — either route, auto-detected:")
+  print("   a) Create: Radars Auto Pitch Controller + Auto Yaw Controller,")
+  print("      Data-Linked to the cannon mount as usual. gunner calls stopAuto()")
+  print("      so the mod's auto-aim stops fighting the computer (this is what")
+  print("      makes YAW move), then setAngle() on each axis.")
+  print("   b) CC:CBC 'Cannon Mount' peripheral, if you have that mod instead.")
   print("")
-  print("3. GPS: at least one CC GPS host cluster in range so gps.locate()")
-  print("   returns this computer's coords. (Or enter coords manually in setup.)")
+  print("   The cannon MOUNT still needs rotational (kinetic) power so the")
+  print("   controllers can physically turn it — the same drive the mod needs.")
   print("")
-  print("4. RADAR (optional): a Create: Radars peripheral exposing getTracks()")
-  print("   on the same wired network, to pick live targets with 'radar'.")
+  print("3. FIRING — no Fire Controller needed:")
+  print("   Wire a redstone line from ONE SIDE of this computer to the cannon's")
+  print("   firing (through your redstone relay / igniter). gunner pulses that")
+  print("   side to fire. Pick the side in setup. (Or use a Fire Controller")
+  print("   peripheral and choose option 2 in setup.)")
   print("")
-  print("5. The cannon must be ASSEMBLED and LOADED (propellant + shell). Use")
-  print("   'assemble' if using a CC:CBC mount; charges are set in setup.")
+  print("4. GPS: a CC GPS host cluster in range so gps.locate() returns coords")
+  print("   (or type them manually in setup).")
   print("")
-  print("Setup once with:  gunner setup   (F3 gives the mount & computer coords)")
+  print("5. RADAR (optional): a Create: Radars getTracks() peripheral to pick")
+  print("   live targets with the 'radar' command.")
+  print("")
+  print("Then: gunner setup  (F3 gives the mount & computer coords).")
 end
 
 -- ===========================================================================
@@ -477,7 +536,7 @@ if cmd == "wiring" then wiring(); return end
 
 cfg = loadCfg()
 if cmd == "setup" or not cfg then cfg = setup(cfg) end
--- Backfill any missing constants so an older cfg still runs.
+-- Backfill any missing fields so an older cfg still runs.
 cfg.gravity = cfg.gravity or GRAV_DEFAULT
 cfg.drag = cfg.drag or DRAG_DEFAULT
 cfg.velPerCharge = cfg.velPerCharge or VPC_DEFAULT
@@ -486,20 +545,37 @@ cfg.pitchMin = cfg.pitchMin or 0
 cfg.pitchMax = cfg.pitchMax or 60
 cfg.yawOffset = cfg.yawOffset or 0
 cfg.pitchOffset = cfg.pitchOffset or 0
-cfg.settleTol = cfg.settleTol or 1.5
-cfg.settleTimeout = cfg.settleTimeout or 8
-cfg.firePulse = cfg.firePulse or 0.5
 cfg.prefArc = cfg.prefArc or "low"
+cfg.fireMode = cfg.fireMode or "redstone"
+cfg.fireSide = cfg.fireSide or "back"
+cfg.firePulse = cfg.firePulse or 0.5
+cfg.slewSeconds = cfg.slewSeconds or 4
 
 backend = findBackend()
+-- Ensure the firing line starts LOW (safety); controllers are taken off the
+-- mod's auto-aim lazily, on the first aim/test, not merely by launching.
+if cfg.fireMode == "redstone" then pcall(function() redstone.setOutput(cfg.fireSide, false) end) end
+
 print("")
 print("=== GUNNER — Create: Big Cannons targeting ===")
-if backend then print("Cannon backend: " .. backend.kind .. " (" .. tostring(backend.name) .. ")")
-else print("WARNING: no cannon peripheral found. Run 'gunner wiring'. (Math still works.)") end
-print(("Mount = gps + offset (%d,%d,%d) | %d charges -> %.1f b/t | pitch %d..%d")
+if backend then
+  print("Aiming backend: " .. backend.kind)
+  if backend.kind == "radar" then
+    print("  pitch controller: " .. tostring(backend.pitchName or "NOT FOUND"))
+    print("  yaw controller:   " .. tostring(backend.yawName or "NOT FOUND"))
+    if not backend.pitchName or not backend.yawName then
+      print("  ! A controller is missing — check the wired-modem hookup for that axis.")
+    end
+  end
+else
+  print("WARNING: no cannon peripheral found. Run 'gunner wiring'. (Math still works.)")
+end
+if cfg.fireMode == "peripheral" then print("Firing: Fire Controller peripheral")
+else print("Firing: redstone pulse on '" .. cfg.fireSide .. "' side (" .. cfg.firePulse .. "s)") end
+print(("Mount = gps + offset (%d,%d,%d) | %d charges -> %.1f b/t | pitch %d..%d | slew %ss")
   :format(cfg.offX or 0, cfg.offY or 0, cfg.offZ or 0, cfg.charges or 0,
-          cfg.muzzleSpeed, cfg.pitchMin, cfg.pitchMax))
-print("Commands: aim | radar | arc | angles | fire | hold | assemble | disassemble | info | setup | wiring | quit")
+          cfg.muzzleSpeed, cfg.pitchMin, cfg.pitchMax, cfg.slewSeconds))
+print("Commands: aim | radar | test | arc | angles | fire | hold | info | setup | wiring | quit")
 
 while true do
   write("\ngunner> ")
@@ -517,6 +593,25 @@ while true do
   elseif c == "radar" then
     radarPick()
 
+  elseif c == "test" then
+    -- Directly command a single raw angle to prove each axis physically moves
+    -- (takes it off auto-aim first). Usage: test yaw <deg> | test pitch <deg>
+    if not backend then print("No cannon peripheral.")
+    else
+      local axis, a = (w[2] or ""):lower(), tonumber(w[3])
+      backend.commission()
+      if axis == "yaw" and a and backend.yawName then
+        pcall(peripheral.call, backend.yawName, "setAngle", a)
+        print(("Commanded YAW -> %.1f. Watch the cannon; it should rotate."):format(a))
+      elseif axis == "pitch" and a and backend.pitchName then
+        pcall(peripheral.call, backend.pitchName, "setAngle", a)
+        print(("Commanded PITCH -> %.1f. Watch the cannon; it should tilt."):format(a))
+      else
+        print("Usage: test yaw <deg> | test pitch <deg>")
+        if backend.kind == "cbc" then print("(cbc backend aims both axes together; use 'angles <yaw> <pitch>')") end
+      end
+    end
+
   elseif c == "arc" then
     cfg.prefArc = (cfg.prefArc == "low") and "high" or "low"
     saveCfg(cfg); print("Preferred arc: " .. cfg.prefArc)
@@ -529,42 +624,43 @@ while true do
     else print("No cannon peripheral.") end
 
   elseif c == "fire" then
-    if backend then backend.fire(true); sleep(cfg.firePulse); backend.fire(false); print("FIRED.")
-    else print("No cannon peripheral.") end
+    firePulse(); print("FIRED.")
 
   elseif c == "hold" then
-    if backend then backend.fire(false); print("Fire signal off.") end
+    fireSet(false); print("Fire signal off.")
 
   elseif c == "assemble" then
-    if backend then local ok = backend.assemble(true); print(ok and "Assembled." or "Assemble not supported by this backend.") end
+    if backend and backend.assemble then local ok = backend.assemble(true); print(ok and "Assembled." or "Assemble not supported by this backend.") end
 
   elseif c == "disassemble" then
-    if backend then backend.assemble(false); print("Disassembled.") end
+    if backend and backend.assemble then backend.assemble(false); print("Disassembled.") end
 
   elseif c == "info" then
     local m, live = currentMount()
     if m then print(("Mount %d %d %d (%s)"):format(math.floor(m.x + .5), math.floor(m.y + .5),
       math.floor(m.z + .5), live and "live GPS" or "static")) end
     if backend then
-      local y, p = backend.readAngles()
-      print(("Cannon angles: yaw %s pitch %s"):format(y and ("%.1f"):format(y) or "?", p and ("%.1f"):format(p) or "?"))
+      local y, p
+      if backend.targetAngles then y, p = backend.targetAngles() else y, p = backend.readAngles() end
+      print(("Commanded angles: yaw %s pitch %s"):format(y and ("%.1f"):format(y) or "?", p and ("%.1f"):format(p) or "?"))
       local i = backend.info(); if i then print("getInfo: " .. textutils.serialise(i)) end
     end
+    print(("Firing: %s%s"):format(cfg.fireMode, cfg.fireMode == "redstone" and (" on " .. cfg.fireSide) or ""))
 
   elseif c == "setup" then
+    if backend and cfg.fireMode == "redstone" then pcall(function() redstone.setOutput(cfg.fireSide, false) end) end
     cfg = setup(cfg); backend = findBackend()
 
   elseif c == "wiring" then
     wiring()
 
   elseif c == "quit" or c == "exit" then
-    if backend then backend.fire(false) end
+    fireSet(false)
     print("Bye."); return
 
   elseif c == "" then
     -- ignore
-
   else
-    print("Unknown command. Try: aim / radar / arc / angles / fire / assemble / info / setup / wiring / quit")
+    print("Unknown command. Try: aim / radar / test / arc / angles / fire / info / setup / wiring / quit")
   end
 end
